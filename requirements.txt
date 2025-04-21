@@ -1,0 +1,10 @@
+flask
+flask_cors
+pyOpenSSL
+gunicorn
+cryptography
+dnspython
+tldextract
+python-whois
+beautifulsoup4
+requests
