@@ -60,7 +60,6 @@ def get_full_cert_data(host):
         "usesLetsEncrypt": 'let\'s encrypt' in org_name.lower() if org_name else False
     }
 
-
 def fetch_html_content(domain):
     try:
         headers = {
@@ -92,14 +91,14 @@ def evaluar_certificado(cert, dominio):
     if not cert.get("isSelfSigned"): score -= 1; breakdown.append("✅ No es autofirmado (-1)")
     if any(org.lower() in cert.get("organizationName", "").lower() for org in trusted_orgs):
         score -= 1; breakdown.append("✅ Organización reconocida (-1)")
-    if cert.get("validDays", 0) > 180: score -= 1; breakdown.append("✅ Duración válida > 180d (-1)")
-    if len(cert.get("subjectAltNames", [])) > 5: score -= 1; breakdown.append("✅ SANs amplios (>5) (-1)")
+    if cert.get("validDays", 0) > 180: score -= 1; breakdown.append("✅ Duración válida > 180 días (-1)")
+    if len(cert.get("subjectAltNames", [])) > 5: score -= 1; breakdown.append("✅ Muchos SANs (>5) (-1)")
 
     # ❌ Reglas negativas
     if cert.get("isSelfSigned"): score += 2; breakdown.append("❌ Autofirmado (+2)")
     if cert.get("usesLetsEncrypt"): score += 1; breakdown.append("❌ Usa Let's Encrypt (+1)")
     if not cert.get("hasOrganizationName"): score += 1; breakdown.append("❌ Sin nombre de organización (+1)")
-    if cert.get("validDays", 0) <= 90: score += 2; breakdown.append("❌ Duración corta (<= 90d) (+2)")
+    if cert.get("validDays", 0) <= 90: score += 2; breakdown.append("❌ Certificado de corta duración (<= 90d) (+2)")
     if len(cert.get("subjectAltNames", [])) <= 2: score += 1; breakdown.append("❌ Pocos SANs (<= 2) (+1)")
     if cert.get("suspiciousSANCount"): score += 2; breakdown.append("❌ SAN sospechoso (+2)")
 
@@ -111,7 +110,7 @@ def evaluar_certificado(cert, dominio):
     if re.search(r"([bcdfghjklmnpqrstvwxyz]{4,}){2,}", dominio.replace(".", "")):
         score += 1; breakdown.append("❌ Dominio aleatorio sospechoso (+1)")
 
-    # WHOIS
+    # WHOIS extra
     try:
         whois_data = whois.whois(dominio)
         if whois_data and not whois_data.get("org"):
@@ -119,15 +118,14 @@ def evaluar_certificado(cert, dominio):
     except:
         pass
 
-    # HTML content
+    # HTML extra
     html = fetch_html_content(dominio)
     if html:
         soup = BeautifulSoup(html, 'html.parser')
         if "bitcoin" in soup.get_text().lower():
-            score += 2
-            breakdown.append("❌ Contenido sospechoso: 'bitcoin' detectado (+2)")
+            score += 2; breakdown.append("❌ Contenido sospechoso: 'bitcoin' detectado (+2)")
 
-    # Levenshtein distance
+    # Levenshtein contra bancos
     bancos_reales = ["bbva.com", "banorte.com", "santander.com.mx", "banamex.com.mx"]
     extra = tldextract.extract(dominio)
     full_domain = f"{extra.domain}.{extra.suffix}"
@@ -138,6 +136,7 @@ def evaluar_certificado(cert, dominio):
             breakdown.append(f"❌ Muy similar a {real} (Levenshtein +2)")
             break
 
+    # Clasificación final
     if score <= -3: nivel = "muy_confiable"
     elif score <= -1: nivel = "confiable"
     elif score <= 1: nivel = "neutral"
@@ -145,21 +144,26 @@ def evaluar_certificado(cert, dominio):
     elif score <= 5: nivel = "sospechoso"
     else: nivel = "peligroso"
 
-    return nivel, score, breakdown
+    return {
+        "dominio": dominio,
+        "nivel": nivel,
+        "score": score,
+        "detalles": breakdown
+    }
 
-# ==================== RUTA FLASK ====================
+# ==================== FLASK ROUTE ====================
 
 @app.route('/analizar/<host>', methods=['GET'])
 def analizar_dominio(host):
     try:
         cert_data = get_full_cert_data(host)
-        nivel, score, detalles = evaluar_certificado(cert_data, host)
+        evaluacion = evaluar_certificado(cert_data, host)
+
         return jsonify({
-            "dominio": host,
-            "nivel": nivel,
-            "score": score,
-            "detalles": detalles
+            "certificado": cert_data,
+            "evaluacion": evaluacion
         }), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
